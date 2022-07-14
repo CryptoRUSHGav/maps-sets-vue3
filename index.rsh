@@ -1,6 +1,8 @@
 "reach 0.1";
 
 export const main = Reach.App(() => {
+  setOptions({ untrustworthyMaps: true });
+
   const Deployer = Participant("Deployer", {
     getInfo: Fun([], Tuple(Token, UInt, UInt)),
     log: Fun(true, Null),
@@ -39,10 +41,10 @@ export const main = Reach.App(() => {
   commit();
 
   // Deployoer should transfer the ASA amount to the contract
-  Deployer.publish(ASA, ASAAmount, airdropAmount, maxMembers).pay([
-    0,
-    [ASAAmount, ASA],
-  ]);
+  Deployer.publish(ASA, ASAAmount, airdropAmount, maxMembers);
+  commit();
+
+  Deployer.pay([0, [ASAAmount, ASA]]);
 
   {
     vWL.ASA.set(ASA);
@@ -61,7 +63,7 @@ export const main = Reach.App(() => {
     })
     .invariant(balance() == 0)
     .invariant(balance(ASA) >= 0)
-    .invariant(Members.Map.size() < 5)
+    .invariant(membersCnt <= maxMembers)
     .while(membersCnt < 5)
     .api(
       // API EXPR
@@ -81,27 +83,39 @@ export const main = Reach.App(() => {
       },
       // API CONSENSUS EXPR
       (returnFunc) => {
+        check(balance(ASA) >= airdropAmount, "NFT needs to move into escrow.");
+        check(!Members.member(this), "You already are a member of our WL.");
         check(
           membersCnt < maxMembers,
           "The whitelist does not accept any more members."
         );
+        check(balance() == 0, "There should be no balance");
 
         Members.insert(this);
 
-        transfer(airdropAmount).to(this);
+        const newMembersCnt = membersCnt + 1;
 
-        check(balance() == 0, "There should be no balance");
+        if (newMembersCnt > maxMembers) {
+          Members.remove(this);
 
-        Deployer.interact.log("We have a new member!");
+          returnFunc(false);
 
-        returnFunc(true);
+          return [newMembersCnt];
+        } else {
+          transfer([0, [airdropAmount, ASA]]).to(this);
 
-        return [membersCnt + 1];
+          Deployer.interact.log("We have a new member!");
+
+          returnFunc(true);
+
+          return [newMembersCnt];
+        }
       }
     );
 
-  check(balance(ASA) == 0, "We should not have any remaining ASA balance");
   transfer([balance(), [balance(ASA), ASA]]).to(Deployer);
+
+  check(balance(ASA) == 0, "We should not have any remaining ASA balance");
 
   commit();
   exit();
